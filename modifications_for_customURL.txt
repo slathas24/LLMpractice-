@@ -1,0 +1,130 @@
+POST https://your-llm-api.company.com/v1/generate
+Authorization: Bearer <your-api-key>
+Body:
+{
+  "prompt": "your prompt",
+  "temperature": 0.7
+}
+
+//==================
+import requests
+import os
+
+def call_custom_llm(prompt: str) -> str:
+    url = os.getenv("LLM_API_URL")  # e.g., https://your-api.com/v1/generate
+    headers = {
+        "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "prompt": prompt,
+        "temperature": 0.7,
+        "max_tokens": 500
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json().get("completion", "")
+
+//=============
+from langchain.llms.base import LLM
+from typing import List, Optional
+import os
+
+class CustomEndpointLLM(LLM):
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        return call_custom_llm(prompt)
+
+    @property
+    def _llm_type(self) -> str:
+        return "custom-endpoint-llm"
+
+
+//===================
+# from langchain.chat_models import ChatOpenAI
+# llm = ChatOpenAI(model_name="gpt-4", openai_api_key=os.getenv("OPENAI_API_KEY"))
+
+from backend.custom_llm import CustomEndpointLLM
+llm = CustomEndpointLLM()
+
+//==========
+LLM_API_URL=https://your-api.company.com/v1/generate
+LLM_API_KEY=your-token-here
+
+//========= Enhancements
+| Feature          | Add                                                    |
+| ---------------- | ------------------------------------------------------ |
+| Retry on failure | Use `tenacity` or retry logic                          |
+| Streaming        | Use `yield` or websockets if your endpoint supports it |
+| Logging          | Log requests/responses for debugging                   |
+| Caching          | Save repeated prompts in Redis or SQLite               |
+
+//========= reg_engine.py 
+import os
+from dotenv import load_dotenv
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain.schema import Document
+from backend.custom_llm import CustomEndpointLLM  # Your custom LLM wrapper
+
+load_dotenv()
+
+def vectorize_docs(docs: dict):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = []
+    for fname, content in docs.items():
+        for doc in splitter.create_documents([content]):
+            doc.metadata = {"source": fname}
+            chunks.append(doc)
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+    return FAISS.from_documents(chunks, embeddings)
+
+def query_themes(vectordb, questions: list):
+    retriever = vectordb.as_retriever(search_type="similarity", k=5)
+    llm = CustomEndpointLLM()  # Use your own API-based LLM here
+    chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+    return {q: chain.run(q) for q in questions}
+
+def store_themes_in_vector_db(themes: list):
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+    docs = [Document(page_content=theme) for theme in themes]
+    return FAISS.from_documents(docs, embeddings)
+
+//==============custom.llm to be kept in backend 
+import os
+import requests
+from typing import Optional, List
+from langchain.llms.base import LLM
+
+class CustomEndpointLLM(LLM):
+    """
+    A custom LangChain-compatible LLM that connects to a private LLM API via HTTP.
+    """
+
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        url = os.getenv("LLM_API_URL")  # Example: https://api.mycompany.com/generate
+        headers = {
+            "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "prompt": prompt,
+            "temperature": 0.7,
+            "max_tokens": 512
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            # Adapt this depending on your API’s response format
+            return result.get("completion", result.get("text", ""))
+        except Exception as e:
+            return f"[ERROR calling LLM API: {e}]"
+
+    @property
+    def _llm_type(self) -> str:
+        return "custom-endpoint-llm"
+
