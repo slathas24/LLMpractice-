@@ -149,3 +149,66 @@ def analyze_documents_for_themes(docs: dict, max_themes_per_chunk=5):
             unique_themes[label] = desc
 
     return unique_themes
+
+
+def extract_themes_from_text(text: str, model="gpt-4o", max_themes=5) -> list:
+    """
+    Uses OpenAI GPT-4o to extract key themes from a given text.
+
+    Returns:
+        A list of (label, description) tuples, e.g.:
+        [("Climate Risk", "Concern over carbon emissions"), ...]
+    """
+    import openai
+    import os
+
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Create prompt
+    prompt = f"""
+Identify up to {max_themes} key themes in the following content. 
+For each theme, return a short label followed by a one-sentence description.
+
+Use bullet points or numbered format.
+
+Content:
+{text}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a thematic analyst specializing in ESG and financial risk documents."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=500
+        )
+
+        output = response.choices[0].message.content.strip()
+        return parse_theme_list(output)
+
+    except Exception as e:
+        print(f"❌ Error extracting themes: {e}")
+        return []
+
+import re
+
+def parse_theme_list(text: str) -> list:
+    """
+    Parses LLM output like:
+    1. Climate Risk – Focus on carbon emissions
+    2. Governance – Oversight of board accountability
+
+    Returns: List of (label, description)
+    """
+    lines = text.strip().splitlines()
+    themes = []
+    for line in lines:
+        match = re.match(r"^\d*\.*\s*(.+?)\s*[-–—]\s*(.+)", line)
+        if match:
+            label, desc = match.groups()
+            themes.append((label.strip(), desc.strip()))
+    return themes
+
