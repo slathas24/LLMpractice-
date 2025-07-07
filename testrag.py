@@ -125,3 +125,27 @@ if __name__ == "__main__":
 
     for q, a in answers.items():
         print(f"\n❓ {q}\n➡️ {a}")
+
+
+
+#  ..creating themes 
+def analyze_documents_for_themes(docs: dict, max_themes_per_chunk=5):
+    all_themes = []
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+
+    for fname, content in docs.items():
+        chunks = splitter.split_text(content)
+        print(f"📄 Analyzing {fname} with {len(chunks)} chunks...")
+
+        for chunk in chunks:
+            themes = extract_themes_from_text(chunk, max_themes=max_themes_per_chunk)
+            all_themes.extend(themes)
+
+    # Deduplicate based on label
+    unique_themes = {}
+    for label, desc in all_themes:
+        if label not in unique_themes:
+            unique_themes[label] = desc
+
+    return unique_themes
