@@ -1,30 +1,134 @@
+import os
+import openai
+from dotenv import load_dotenv
+from PyPDF2 import PdfReader
+from docx import Document as DocxDocument
+from pptx import Presentation
+from langchain.schema import Document
+from langchain.vectorstores import FAISS
+from langchain.embeddings.base import Embeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-def build_faiss_vector_db(docs: list[Document], save_path: str):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = splitter.split_documents(docs)
+# Load environment
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ----------- File Extractors -----------
+
+def extract_text_from_pdf(filepath):
+    try:
+        with open(filepath, "rb") as f:
+            reader = PdfReader(f)
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as e:
+        print(f"❌ PDF error [{filepath}]: {e}")
+        return ""
+
+def extract_text_from_docx(filepath):
+    try:
+        doc = DocxDocument(filepath)
+        return "\n".join(p.text for p in doc.paragraphs)
+    except Exception as e:
+        print(f"❌ DOCX error [{filepath}]: {e}")
+        return ""
+
+def extract_text_from_pptx(filepath):
+    try:
+        prs = Presentation(filepath)
+        return "\n".join(
+            shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")
+        )
+    except Exception as e:
+        print(f"❌ PPTX error [{filepath}]: {e}")
+        return ""
+
+def extract_text(filepath):
+    if filepath.endswith(".pdf"):
+        return extract_text_from_pdf(filepath)
+    elif filepath.endswith(".docx"):
+        return extract_text_from_docx(filepath)
+    elif filepath.endswith(".pptx"):
+        return extract_text_from_pptx(filepath)
+    return ""
+
+# ----------- Manual Embedding -----------
+
+def get_embedding(text: str):
+    try:
+        response = openai.Embedding.create(
+            input=text,
+            model="text-embedding-3-large"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"❌ Embedding error: {e}")
+        return [0.0] * 1536
+
+class ManualEmbedder(Embeddings):
+    def __init__(self, vectors): self.vectors = vectors
+    def embed_documents(self, texts): return self.vectors
+    def embed_query(self, text): return self.vectors[0]
+
+# ----------- Vectorization Pipeline -----------
+
+def build_vector_db_from_folder(folder_path, db_path="faiss_top50_db", max_files=50):
+    documents = []
+
+    # Step 1: Read top 50 supported files
+    file_list = [f for f in os.listdir(folder_path) if f.endswith((".pdf", ".docx", ".pptx"))]
+    file_list = sorted(file_list)[:max_files]
+
+    for fname in file_list:
+        fpath = os.path.join(folder_path, fname)
+        print(f"📄 Reading: {fname}")
+        text = extract_text(fpath)
+        if text.strip():
+            documents.append(Document(page_content=text, metadata={"source": fname}))
+
+    if not documents:
+        print("⚠️ No documents extracted.")
+        return
+
+    # Step 2: Chunking
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = splitter.split_documents(documents)
+    print(f"🧩 Created {len(chunks)} chunks from {len(documents)} documents.")
+
+    # Step 3: Manual embedding
     texts = [doc.page_content for doc in chunks]
     metadatas = [doc.metadata for doc in chunks]
     vectors = []
 
     for i, text in enumerate(texts):
-        if not text.strip(): continue
-        try:
-            print(f"🔹 Embedding chunk {i+1}/{len(texts)}")
-            vector = get_embedding(text)
-            vectors.append(vector)
-        except Exception as e:
-            print(f"❌ Error embedding chunk {i}: {e}")
-            vectors.append([0.0] * 1536)  # fallback
+        print(f"🔹 Embedding chunk {i+1}/{len(texts)}")
+        if not text.strip():
+            vectors.append([0.0] * 1536)
+            continue
+        if len(text) > 12000:
+            text = text[:12000]
+        vectors.append(get_embedding(text))
 
-    assert len(vectors) == len(texts)
-
-    # Wrap back into Document objects
-    chunk_docs = [Document(page_content=texts[i], metadata=metadatas[i]) for i in range(len(texts))]
+    # Step 4: Build FAISS
+    final_docs = [Document(page_content=texts[i], metadata=metadatas[i]) for i in range(len(texts))]
     embedder = ManualEmbedder(vectors)
+    vector_db = FAISS.from_documents(final_docs, embedding=embedder)
+    vector_db.save_local(db_path)
+    print(f"✅ FAISS vector DB saved at: {db_path}")
 
-    vector_db = FAISS.from_documents(chunk_docs, embedding=embedder)
-    vector_db.save_local(save_path)
-    print(f"✅ Saved vector DB at: {save_path}")
-    return vector_db
+# ----------- Optional: Query the Vector DB -----------
+
+def query_vector_db(db_path, query):
+    dummy = ManualEmbedder([[0.0] * 1536])
+    vector_db = FAISS.load_local(db_path, dummy)
+    results = vector_db.similarity_search(query, k=3)
+
+    for i, doc in enumerate(results, 1):
+        print(f"\n🔎 Match {i} from {doc.metadata['source']}")
+        print(doc.page_content[:300], "...\n")
+
+# ----------- Run the Script -----------
+
+if __name__ == "__main__":
+    folder = "./your_folder_here"  # 🔁 Replace with your folder path
+    build_vector_db_from_folder(folder, db_path="faiss_top50_db", max_files=50)
+    query_vector_db("faiss_top50_db", "What are the financial governance risks?")
