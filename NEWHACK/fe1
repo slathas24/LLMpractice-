@@ -1,1 +1,9 @@
-Sample
+class AIEmbedder(Embeddings):
+    def __init__(self, given_vectors):
+        self._vectors = given_vectors
+        
+    def embed_documents(self, texts):
+       return self._vectors
+
+    def embed_query(self, text):
+        return self._vectors[0]  if self._vectors else [0.0]*1536
