@@ -1,7 +1,6 @@
 import openai
 import os
-#OPENAI_API_KEY="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"
-openai_api_key="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"
+
 
 def analyze_transcript(transcript: str):
     #openai.api_key = OPENAI_API_KEY 
@@ -48,4 +47,5 @@ def chat_validate(transcript: str, extracted: dict, question: str):
         print("OpenAI error in chat_validate:", e)
         traceback.print_exc()
         return {"error": str(e)}
+
 
