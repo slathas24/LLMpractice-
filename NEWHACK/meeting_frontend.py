@@ -72,7 +72,7 @@ if submitted:
         st.session_state.notes = notes
         st.session_state.approver_name = approver_name
 
-        openai.api_key = "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"
+        openai.api_key = "sk-proj-Nz
         prompt = (
             f"Project ID: {project_id}\nMeeting Type: {meeting_type}\nMeeting Notes: {notes}\n"
             "Extract the high-level action points and decisions from these meeting notes as a bullet list."
@@ -212,3 +212,4 @@ if search_clicked and project_query:
     else:
         st.info(f"No meetings found for category '{project_query}'.")
 '''
+
